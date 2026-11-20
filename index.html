@@ -1,0 +1,403 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Дашборд собственника</title>
+<style>
+:root{font-family:system-ui,sans-serif;color:#16243a;background:#f2f5f8;--line:#dce4ec;--blue:#235b98;--green:#08746c}
+*{box-sizing:border-box}body{margin:0}main{max-width:1320px;margin:auto;padding:24px}
+header,.filters,.legend,.actions{display:flex;align-items:center;gap:12px;flex-wrap:wrap}header{justify-content:space-between;margin-bottom:20px}
+h1{font-size:clamp(1.5rem,4vw,2.25rem);margin:0}h2{font-size:1rem;margin:0 0 12px}
+label{display:grid;gap:4px;font-size:.875rem}button,select,input{font:inherit}button,select{min-height:42px;border:1px solid var(--line);border-radius:6px;background:white;color:inherit;padding:7px 12px}button{cursor:pointer}button.primary{background:var(--blue);border-color:var(--blue);color:white}
+.filters,.panel,.card{background:white;border:1px solid var(--line);border-radius:10px;padding:16px;min-width:0}.filters{align-items:end}
+.cards,.charts{display:grid;gap:12px;margin-block:12px}.cards{grid-template-columns:repeat(auto-fit,minmax(min(100%,168px),1fr))}.charts{grid-template-columns:minmax(0,2fr) minmax(0,1fr)}.charts> :last-child{grid-column:1/-1}
+.card strong{display:block;font-size:1.45rem;font-variant-numeric:tabular-nums;margin-block:6px}.muted,small{color:#53627a}.bad{color:#a42932}.good{color:#08746c}
+.scroll{overflow-x:auto}.chart svg{display:block;width:100%;height:auto}table{width:100%;border-collapse:collapse;white-space:nowrap;font-variant-numeric:tabular-nums}th,td{padding:9px 12px;border-bottom:1px solid var(--line);text-align:left}th:nth-child(n+3),td:nth-child(n+3){text-align:right}tr.overdue td{background:#fff1f1}.legend{font-size:.875rem}
+dialog{width:min(92vw,460px);border:1px solid var(--line);border-radius:10px;padding:20px;color:inherit}dialog form{display:grid;gap:12px}dialog::backdrop{background:#16243a88}
+button,select{min-height:44px}input[type=file]{max-width:100%;min-width:0}input[type=file]::file-selector-button{min-height:44px;margin-right:8px;border:1px solid var(--line);border-radius:6px;background:white;color:inherit;font:inherit;padding:6px 10px}
+.chart .legend{margin-top:6px}.chart svg{min-width:0}
+@media(max-width:640px){
+  main{padding:12px}.charts{grid-template-columns:minmax(0,1fr)}.charts> :last-child{grid-column:auto}
+  .filters>*{flex:1 1 120px;min-width:0}.filters select{width:100%}
+  .actions{gap:8px}header .actions{width:100%}header .actions button{flex:1 1 auto}
+  .chart{overflow:visible}.chart .legend{gap:4px 10px}
+  .receivables table,.receivables tbody{display:block;width:100%;white-space:normal}
+  .receivables thead{position:absolute;width:1px;height:1px;clip-path:inset(50%);overflow:hidden}
+  .receivables tr{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:10px 12px;border:1px solid var(--line);border-radius:8px;padding:12px;margin-bottom:8px}
+  .receivables tr:last-child{margin-bottom:0}.receivables tr.overdue{background:#fff1f1;border-color:#edc9cb}
+  .receivables td:nth-child(n){text-align:left;padding:0;border:0;overflow-wrap:anywhere}
+  .receivables td::before{display:block;content:attr(data-label);color:#53627a;font-size:.75rem;margin-bottom:2px}
+  .receivables td:first-child,.receivables td[colspan]{grid-column:1/-1}
+  .receivables td[colspan]::before{display:none}
+  .receivables td:nth-child(5),.receivables tr.overdue td:last-child{font-weight:650}
+}
+</style>
+</head>
+<body><main>
+<header><h1>Дашборд собственника</h1><div class="actions"><button class="primary" id="openImport">Загрузить свои CSV</button><button id="reset">Вернуть пример</button></div></header>
+<section class="filters" aria-label="Фильтры">
+<label>Период<select id="mode"><option value="month">Один месяц</option><option value="range">Диапазон</option></select></label>
+<label><span id="fromLabel">Месяц</span><select id="from"></select></label><label id="endFilter" hidden>По<select id="to"></select></label>
+<label>Направление<select id="direction"></select></label>
+</section>
+<p id="status" role="status" class="muted"></p>
+<section id="cards" class="cards" aria-label="Показатели"></section>
+<section class="charts">
+<article class="panel"><h2>Выручка и валовая маржа по месяцам</h2><div id="trend" class="chart scroll"></div></article>
+<article class="panel"><h2>Выручка по направлениям</h2><div id="segments"></div></article>
+<article class="panel"><h2>Остатки на счетах по месяцам</h2><div id="balances" class="chart scroll"></div></article>
+</section>
+<section class="panel receivables"><h2>Дебиторская задолженность</h2><div class="scroll" tabindex="0"><table role="table"><thead role="rowgroup"><tr role="row"><th scope="col">Клиент</th><th scope="col">Счёт</th><th scope="col">Сумма</th><th scope="col">Оплачено</th><th scope="col" aria-sort="descending">Долг</th><th scope="col">Дней просрочки</th></tr></thead><tbody role="rowgroup" id="receivables"></tbody></table></div></section>
+<dialog id="importDialog"><form id="importForm"><h2>Загрузить свои CSV</h2><small>Файлы обрабатываются в браузере. Данные сохранятся на этом устройстве в текущем браузере.</small>
+<label>Выручка и себестоимость<input type="file" name="sales" accept=".csv" required></label>
+<label>Постоянные расходы<input type="file" name="expenses" accept=".csv" required></label>
+<label>Дебиторка<input type="file" name="receivables" accept=".csv" required></label>
+<label>Остатки на счетах<input type="file" name="balances" accept=".csv" required></label>
+<p id="importError" role="alert" class="bad" hidden></p>
+<div class="actions"><button class="primary" type="submit">Загрузить</button><button type="button" id="cancelImport">Отмена</button></div></form></dialog>
+</main><script type="text/plain" id="data-sales">Месяц;Направление;Выручка, руб.;Себестоимость, руб.
+2026-01;Направление А;486000;249100
+2026-01;Направление Б;337000;197200
+2026-01;Направление В;188000;98700
+2026-02;Направление А;522000;258200
+2026-02;Направление Б;349000;204400
+2026-02;Направление В;192000;104400
+2026-03;Направление А;501000;267300
+2026-03;Направление Б;361000;211600
+2026-03;Направление В;210000;110100
+2026-04;Направление А;537000;276400
+2026-04;Направление Б;373000;218800
+2026-04;Направление В;214000;115800
+2026-05;Направление А;573000;285500
+2026-05;Направление Б;385000;226000
+2026-05;Направление В;232000;121500
+2026-06;Направление А;552000;294600
+2026-06;Направление Б;397000;233200
+2026-06;Направление В;236000;127200
+2026-07;Направление А;588000;303700
+2026-07;Направление Б;409000;240400
+2026-07;Направление В;254000;132900
+2026-08;Направление А;624000;312800
+2026-08;Направление Б;421000;247600
+2026-08;Направление В;258000;138600
+2026-09;Направление А;603000;321900
+2026-09;Направление Б;433000;254800
+2026-09;Направление В;276000;144300
+2026-10;Направление А;639000;331000
+2026-10;Направление Б;445000;262000
+2026-10;Направление В;280000;150000</script>
+<script type="text/plain" id="data-expenses">Месяц;Аренда, руб.;ФОТ управленцев, руб.;Маркетинг, руб.;Прочее, руб.
+2026-01;78000;156000;29000;17300
+2026-02;78000;156000;33000;18600
+2026-03;78000;156000;25000;19900
+2026-04;78000;156000;29000;21200
+2026-05;78000;156000;33000;22500
+2026-06;78000;156000;25000;23800
+2026-07;78000;156000;29000;25100
+2026-08;78000;156000;33000;26400
+2026-09;78000;156000;25000;27700
+2026-10;78000;156000;29000;29000</script>
+<script type="text/plain" id="data-receivables">Счёт;Клиент;Дата счёта;Срок оплаты;Сумма, руб.;Оплачено, руб.;Дата оплаты
+ДЕМО-01;Клиент Б;2026-01-04;2026-01-20;35500;35500;2026-01-19
+ДЕМО-02;Клиент В;2026-02-04;2026-02-20;42000;42000;2026-02-19
+ДЕМО-03;Клиент Г;2026-03-04;2026-03-20;48500;48500;2026-03-19
+ДЕМО-04;Клиент Д;2026-04-04;2026-04-20;55000;55000;2026-04-19
+ДЕМО-05;Клиент А;2026-05-04;2026-05-20;61500;61500;2026-05-19
+ДЕМО-06;Клиент Б;2026-06-04;2026-06-20;68000;68000;2026-06-19
+ДЕМО-07;Клиент В;2026-07-04;2026-07-20;74500;74500;2026-07-19
+ДЕМО-08;Клиент Г;2026-08-04;2026-08-20;81000;81000;2026-08-19
+ДЕМО-09;Клиент Д;2026-09-04;2026-09-20;87500;87500;2026-09-19
+ДЕМО-10;Клиент А;2026-09-17;2026-10-02;96000;28000;2026-10-06
+ДЕМО-11;Клиент Б;2026-10-05;2026-10-22;75000;0;
+ДЕМО-12;Клиент В;2026-10-20;;53000;0;
+ДЕМО-13;Клиент Г;2026-10-21;2026-10-28;64000;64000;2026-11-03</script>
+<script type="text/plain" id="data-balances">Месяц (на конец);Счёт;Остаток, руб.
+2026-01;Расчётный счёт А;468500
+2026-01;Расчётный счёт Б;263000
+2026-01;Депозит А;320000
+2026-02;Расчётный счёт А;471000
+2026-02;Расчётный счёт Б;281000
+2026-02;Депозит А;340000
+2026-03;Расчётный счёт А;519500
+2026-03;Расчётный счёт Б;299000
+2026-03;Депозит А;360000
+2026-04;Расчётный счёт А;522000
+2026-04;Расчётный счёт Б;317000
+2026-04;Депозит А;380000
+2026-05;Расчётный счёт А;570500
+2026-05;Расчётный счёт Б;335000
+2026-05;Депозит А;400000
+2026-06;Расчётный счёт А;573000
+2026-06;Расчётный счёт Б;353000
+2026-06;Депозит А;420000
+2026-07;Расчётный счёт А;621500
+2026-07;Расчётный счёт Б;371000
+2026-07;Депозит А;440000
+2026-08;Расчётный счёт А;624000
+2026-08;Расчётный счёт Б;389000
+2026-08;Депозит А;460000
+2026-09;Расчётный счёт А;672500
+2026-09;Расчётный счёт Б;407000
+2026-09;Депозит А;480000
+2026-10;Расчётный счёт А;675000
+2026-10;Расчётный счёт Б;425000
+2026-10;Депозит А;500000</script><script>const EXAMPLE = Object.fromEntries(["sales","expenses","receivables","balances"].map(key=>[key,document.getElementById("data-"+key).textContent.replaceAll("</scrip__CSV_ESC__t","</scr"+"ipt")]));
+const $ = id => document.getElementById(id);
+const mon = new Intl.DateTimeFormat('ru-RU',{month:'short',year:'numeric',timeZone:'UTC'});
+const nf = new Intl.NumberFormat('ru-RU',{maximumFractionDigits:2});
+const rub = n => nf.format(n)+' ₽';
+const label = m => mon.format(new Date(m+'-01T00:00:00Z')).replace(' г.','');
+const esc = s => String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const sum = (rows,key) => rows.reduce((n,row)=>n+row[key],0);
+function shift(m,n){
+  const [y,k]=m.split('-').map(Number);
+  return new Date(Date.UTC(y,k-1+n,1)).toISOString().slice(0,7);
+}
+const endOf = m => new Date(Date.parse(shift(m,1)+'-01')-86400000).toISOString().slice(0,10);
+const days = (a,b) => Math.round((Date.parse(a)-Date.parse(b))/86400000);
+function csv(text){
+  text=text.replace(/^\uFEFF/,'');
+  const first=text.split(/\r?\n/,1)[0];
+  const delim=first.includes(';')?';':first.includes('\t')?'\t':',';
+  const result=[]; let row=[], field='', quoted=false;
+  for(let i=0;i<text.length;i++){
+    const c=text[i];
+    if(c==='"' && quoted && text[i+1]==='"'){field+='"';i++;}
+    else if(c==='"' && (quoted || field==='')) quoted=!quoted;
+    else if(!quoted && (c===delim || c==='\r' || c==='\n')){
+      row.push(field.trim());field='';
+      if(c!==delim){
+        if(c==='\r' && text[i+1]==='\n')i++;
+        if(row.some(Boolean))result.push(row);
+        row=[];
+      }
+    }else field+=c;
+  }
+  if(quoted)throw Error('Незакрытое поле в кавычках');
+  row.push(field.trim()); if(row.some(Boolean))result.push(row);
+  if(!result.length)throw Error('Пустой файл');
+  const [headers,...rows]=result;
+  if(rows.some(r=>r.length!==headers.length))throw Error('Число полей не совпадает с заголовком');
+  return {headers,rows};
+}
+function date(s){
+  const local=/^(\d{1,2})[./](\d{1,2})[./](\d{4})$/.exec(s);
+  if(local)s=[local[3],local[2].padStart(2,'0'),local[1].padStart(2,'0')].join('-');
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(s)||!Number.isFinite(Date.parse(s))||new Date(s).toISOString().slice(0,10)!==s)throw Error('Некорректная дата «'+s+'»');
+  return s;
+}
+function month(s){return date(/^\d{4}-\d{2}$/.test(s)?s+'-01':s).slice(0,7);}
+function amount(s){
+  const v=s.replace(/[\s₽]/g,'').replace(',','.');
+  if(!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(v)||!Number.isFinite(Number(v)))throw Error('Некорректная сумма «'+s+'»');
+  return Math.round(Number(v)*100)/100;
+}
+function readFile(text,name,fields){
+  try{
+    const {headers,rows}=csv(text);
+    const lookup=headers.map(h=>h.toLowerCase().replace(/ё/g,'е').replace(/[,\s]*(руб\.?|₽)$/,'').trim());
+    const cols=Object.entries(fields).map(([key,[names,convert,optional]])=>{
+      const i=lookup.findIndex(h=>names.includes(h));
+      if(i<0&&!optional)throw Error('Отсутствует колонка «'+names[0]+'»');
+      return {key,i,convert,optional};
+    });
+    return {rows:rows.map((r,index)=>{
+      try{return Object.fromEntries(cols.map(({key,i,convert,optional})=>{
+        const v=r[i]||'';
+        if(!v&&!optional)throw Error('Пустая колонка «'+headers[i]+'»');
+        return [key,v?convert(v):null];
+      }));}catch(e){throw Error('Строка '+(index+2)+'. '+e.message);}
+    }),scoped:cols.some(c=>c.key==='direction'&&c.i>=0)};
+  }catch(e){throw Error(name+'. '+e.message);}
+}
+const str = x=>x;
+const directionField=[['направление'],str,true];
+const monthField=[['месяц','месяц (на конец)','период','дата'],month];
+const schema={
+  sales:['Выручка и себестоимость',{month:monthField,direction:[['направление'],str],revenue:[['выручка'],amount],cost:[['себестоимость'],amount]}],
+  expenses:['Постоянные расходы',{month:monthField,direction:directionField,rent:[['аренда'],amount],payroll:[['фот управленцев'],amount],marketing:[['маркетинг'],amount],other:[['прочее'],amount]}],
+  balances:['Остатки на счетах',{month:monthField,direction:directionField,balance:[['остаток','остаток на конец месяца','остаток на конец периода','сумма'],amount]}],
+  receivables:['Дебиторка',{direction:directionField,client:[['клиент','контрагент'],str],invoice:[['счет','номер счета','№ счета'],str],issued:[['дата счета','дата выставления'],date],due:[['срок оплаты','дата платежа по договору','плановая дата оплаты'],date,true],total:[['сумма счета','сумма'],amount],paid:[['оплачено','сумма оплаты','сумма платежа'],amount,true],payment:[['дата оплаты','дата платежа'],date,true]}]
+};
+function readDataset(raw){
+  const ds=Object.fromEntries(Object.entries(schema).map(([k,[name,fields]])=>[k,readFile(raw[k],name,fields)]));
+  if(!ds.sales.rows.length)throw Error('Добавьте хотя бы одну строку выручки.');
+  if(ds.receivables.rows.some(r=>r.paid && !r.payment))throw Error('Дебиторка. Укажите даты всех ненулевых оплат.');
+  return ds;
+}
+function between(rows,a,b){return rows.filter(r=>r.month>=a&&r.month<=b);}
+function choose(rows,d){return d?rows.filter(r=>r.direction===d):rows;}
+function performance(ds,a,b,d){
+  const all=between(ds.sales.rows,a,b), sales=choose(all,d);
+  if(!all.length)return {};
+  const revenue=sum(sales,'revenue');
+  const margin=revenue-sum(sales,'cost');
+  let expense=0, complete=true;
+  for(let m=a;m<=b;m=shift(m,1)){
+    const monthly=all.filter(r=>r.month===m);
+    const fixed=ds.expenses.rows.filter(r=>r.month===m);
+    if(!monthly.length||!fixed.length){complete=false;continue;}
+    const total=sum(monthly,'revenue');
+    const share=d?(total?sum(choose(monthly,d),'revenue')/total:null):1;
+    if(share===null){complete=false;continue;}
+    const shared=fixed.filter(r=>!r.direction);
+    const own=fixed.filter(r=>r.direction&&(!d||r.direction===d));
+    const totalExpenses=rows=>rows.reduce((n,r)=>n+r.rent+r.payroll+r.marketing+r.other,0);
+    expense+=totalExpenses(shared)*share+totalExpenses(own);
+  }
+  return {revenue,margin,rate:revenue?margin/revenue*100:null,profit:complete?margin-expense:null};
+}
+function debtRows(source,m,d){
+  if(d&&!source.scoped)return null;
+  const day=endOf(m), invoices=new Map();
+  for(const r of choose(source.rows,d)){
+    if(r.issued>day)continue;
+    const key=JSON.stringify([r.client,r.invoice,r.issued,r.direction]);
+    const bill=invoices.get(key)||{...r,paid:0};
+    if(r.payment&&r.payment<=day)bill.paid+=r.paid||0;
+    invoices.set(key,bill);
+  }
+  return [...invoices.values()].map(r=>{
+    const due=r.due||new Date(Date.parse(r.issued)+30*86400000).toISOString().slice(0,10);
+    return {...r,debt:Math.round((r.total-r.paid)*100)/100,late:Math.max(0,days(day,due))};
+  }).filter(r=>r.debt>0).sort((a,b)=>b.debt-a.debt||b.late-a.late);
+}
+function balance(source,m,d){
+  if(d&&!source.scoped)return null;
+  const rows=choose(source.rows.filter(r=>r.month===m),d);
+  return rows.length?sum(rows,'balance'):null;
+}
+function indicators(ds,a,b,d,debt){
+  return {...performance(ds,a,b,d),debt:debt?sum(debt,'debt'):null,
+    overdue:debt?sum(debt.filter(r=>r.late),'debt'):null,cash:balance(ds.balances,b,d)};
+}
+const KEYS=[['revenue','Выручка'],['margin','Валовая маржа'],['rate','Валовая маржа, %'],['profit','Операционная прибыль'],['debt','Дебиторка всего'],['overdue','Просроченная дебиторка'],['cash','Деньги на счетах']];
+const colors=['#235b98','#08746c'];
+let ds, months, custom=false, notice='';
+function options(select,values,caption){select.replaceChildren(...values.map(v=>new Option(caption(v),v)));}
+function activate(next,isCustom){
+  ds=next;custom=isCustom;
+  const periods=[...next.sales.rows,...next.expenses.rows,...next.balances.rows].map(r=>r.month).sort();
+  months=[];
+  for(let m=periods[0];m<=periods.at(-1);m=shift(m,1))months.push(m);
+  for(const id of ['from','to']){options($(id),months,label);$(id).value=months.at(-1);}
+  $('mode').value='month';
+  options($('direction'),['',...[...new Set(next.sales.rows.map(r=>r.direction))].sort((a,b)=>a.localeCompare(b,'ru'))],d=>d||'Все направления');
+  render();
+}
+function range(a,b){return a===b?label(a):label(a)+' — '+label(b);}
+function renderCards(now,prev,prior,d){
+  $('cards').innerHTML=KEYS.map(([key,title])=>{
+    const n=now[key], p=prev[key], rate=key==='rate';
+    const value=n==null?'—':rate?nf.format(n)+' %':rub(n);
+    const diff=n==null||p==null?null:Math.round((n-p)*100)/100;
+    const signed=diff==null?'':(diff>0?'+':diff<0?'−':'')+(rate?nf.format(Math.abs(diff))+' п. п.':rub(Math.abs(diff)));
+    const favorable=['debt','overdue'].includes(key)?-diff:diff;
+    const restricted=d&&((['debt','overdue'].includes(key)&&!ds.receivables.scoped)||(key==='cash'&&!ds.balances.scoped));
+    return '<article class="card"><span>'+title+'</span><strong>'+value+'</strong><small class="'+(favorable>0?'good':favorable<0?'bad':'')+'">'+(restricted?'Только по компании':diff==null?'Нет данных для сравнения':esc(signed)+' к '+esc(prior))+'</small></article>';
+  }).join('');
+}
+function compact(n){
+  if(Math.abs(n)>=1e6)return nf.format(n/1e6)+' млн';
+  if(Math.abs(n)>=1e3)return nf.format(n/1e3)+' тыс.';
+  return nf.format(n);
+}
+function plot(target,series,a,b){
+  const values=series.flatMap(s=>s.values).filter(Number.isFinite);
+  if(!values.length){$(target).textContent='Нет данных по выбранному направлению.';return;}
+  const width=Math.max(200,Math.floor($(target).clientWidth)), height=218,L=65,R=12,T=18,B=170;
+  const min=Math.min(0,...values), max=Math.max(0,...values);
+  const span=max-min||1, step=(width-L-R)/months.length;
+  const x=i=>L+step*(i+.5), y=v=>B-(v-min)/span*(B-T);
+  const ia=months.indexOf(a), ib=months.indexOf(b);
+  const grid=Array.from({length:5},(_,i)=>{
+    const v=min+i*span/4;
+    return '<line x1="'+L+'" x2="'+(width-R)+'" y1="'+y(v)+'" y2="'+y(v)+'" stroke="#dce4ec"/><text x="'+(L-5)+'" y="'+(y(v)+4)+'" text-anchor="end">'+compact(v)+'</text>';
+  }).join('');
+  const paths=series.map((s,j)=>{
+    let previous=false;
+    const path=s.values.map((v,i)=>{
+      if(v==null){previous=false;return '';}
+      const entry=(previous?'L':'M')+x(i)+','+y(v);
+      previous=true;return entry;
+    }).join(' ');
+    return '<path d="'+path+'" fill="none" stroke="'+colors[j]+'" stroke-width="2.5"/>'+s.values.map((v,i)=>v==null?'':'<circle cx="'+x(i)+'" cy="'+y(v)+'" r="4" fill="'+colors[j]+'"><title>'+esc(label(months[i])+' · '+s.name+' · '+rub(v))+'</title></circle>').join('');
+  }).join('');
+  const every=Math.max(1,Math.ceil(months.length/Math.max(2,Math.floor((width-L-R)/70))));
+  const indexes=new Set([0,months.length-1]);
+  for(let i=every;i<months.length-1;i+=every)if(months.length-1-i>=every)indexes.add(i);
+  const ticks=months.map((m,i)=>!indexes.has(i)?'':'<text x="'+x(i)+'" y="197" text-anchor="middle">'+esc(label(m))+'</text>').join('');
+  $(target).innerHTML='<svg viewBox="0 0 '+width+' '+height+'" role="img" aria-label="'+esc(series.map(s=>s.name).join(', '))+'" font-size="11" fill="#495970"><rect x="'+(L+step*ia)+'" y="'+T+'" width="'+(step*(ib-ia+1))+'" height="'+(B-T)+'" fill="#dcecff"/>'+grid+paths+ticks+'</svg><div class="legend">'+series.map((s,j)=>'<span style="color:'+colors[j]+'">● '+esc(s.name)+'</span>').join('')+'<span class="muted">Синим фоном выделен выбранный период</span></div>';
+}
+function segments(a,b,d){
+  const totals=new Map();
+  for(const row of between(ds.sales.rows,a,b))totals.set(row.direction,(totals.get(row.direction)||0)+row.revenue);
+  const ordered=[...totals].sort((x,y)=>y[1]-x[1]);
+  const max=Math.max(1,...ordered.map(([,v])=>Math.abs(v)));
+  $('segments').innerHTML=ordered.map(([name,v])=>'<div style="margin-bottom:12px;opacity:'+(d&&d!==name?'.55':'1')+'"><b>'+esc(name)+'</b><div>'+rub(v)+'</div><div style="height:7px;background:#e6edf5;margin-top:4px"><div style="height:100%;width:'+Math.abs(v)/max*100+'%;background:#235b98"></div></div></div>').join('')||'Нет данных за период.';
+}
+function render(){
+  const isRange=$('mode').value==='range';
+  $('endFilter').hidden=!isRange;
+  $('endFilter').style.display=isRange?'grid':'none';
+  $('fromLabel').textContent=isRange?'С':'Месяц';
+  const a=$('from').value;
+  for(const option of $('to').options)option.disabled=option.value<a;
+  if($('to').value<a)$('to').value=a;
+  const b=isRange?$('to').value:a, d=$('direction').value;
+  const span=months.indexOf(b)-months.indexOf(a)+1, pa=shift(a,-span), pb=shift(a,-1);
+  const debt=debtRows(ds.receivables,b,d);
+  renderCards(indicators(ds,a,b,d,debt),indicators(ds,pa,pb,d,debtRows(ds.receivables,pb,d)),range(pa,pb),d);
+  $('status').textContent=range(a,b)+' · '+(custom?'Загруженные данные':'Вымышленные данные')+(notice?' · '+notice:'');
+  const trend=months.map(m=>{
+    const rows=choose(ds.sales.rows.filter(r=>r.month===m),d);
+    if(!rows.length)return {};
+    const revenue=sum(rows,'revenue');
+    return {revenue,margin:revenue-sum(rows,'cost')};
+  });
+  plot('trend',[{name:'Выручка, ₽',values:trend.map(v=>v.revenue??null)},{name:'Валовая маржа, ₽',values:trend.map(v=>v.margin??null)}],a,b);
+  plot('balances',[{name:'Остаток, ₽',values:months.map(m=>balance(ds.balances,m,d))}],a,b);
+  segments(a,b,d);
+  $('receivables').innerHTML=debt?.length?debt.map(r=>'<tr role="row"'+(r.late?' class="overdue"':'')+'><td role="cell" data-label="Клиент">'+esc(r.client)+'</td><td role="cell" data-label="Счёт">'+esc(r.invoice)+'</td><td role="cell" data-label="Сумма">'+rub(r.total)+'</td><td role="cell" data-label="Оплачено">'+rub(r.paid)+'</td><td role="cell" data-label="Долг">'+rub(r.debt)+'</td><td role="cell" data-label="Дней просрочки">'+r.late+'</td></tr>').join(''):'<tr><td colspan="6">'+(debt===null?'Доступно только по компании.':'Открытых счетов на конец периода нет.')+'</td></tr>';
+}
+const storageKey='owner-dashboard.public.csv.v1';
+async function decode(file){
+  const bytes=await file.arrayBuffer();
+  try{return new TextDecoder('utf-8',{fatal:true}).decode(bytes);}
+  catch{return new TextDecoder('windows-1251').decode(bytes);}
+}
+for(const id of ['mode','from','to','direction'])$(id).addEventListener('change',render);
+$('openImport').onclick=()=>{$('importError').hidden=true;$('importDialog').showModal();};
+$('cancelImport').onclick=()=>$('importDialog').close();
+$('importForm').onsubmit=async event=>{
+  event.preventDefault();
+  const form=event.currentTarget, error=$('importError'), button=form.querySelector('[type=submit]');
+  error.hidden=true;button.disabled=true;
+  try{
+    const files=new FormData(form);
+    const raw=Object.fromEntries(await Promise.all(Object.keys(schema).map(async k=>[k,await decode(files.get(k))])));
+    const next=readDataset(raw);notice='';
+    try{localStorage.setItem(storageKey,JSON.stringify(raw));}
+    catch{notice='Браузер не сохранил данные для следующего открытия';}
+    activate(next,true);form.reset();$('importDialog').close();
+  }catch(e){error.textContent=e.message;error.hidden=false;}
+  finally{button.disabled=false;}
+};
+$('reset').onclick=()=>{
+  notice='';
+  try{localStorage.removeItem(storageKey);}
+  catch{notice='Хранилище браузера недоступно';}
+  activate(readDataset(EXAMPLE),false);
+};
+function start(){
+  try{
+    const saved=localStorage.getItem(storageKey);
+    if(saved){activate(readDataset(JSON.parse(saved)),true);return;}
+  }catch{notice='Сохранённый набор прочитать не удалось';}
+  try{activate(readDataset(EXAMPLE),false);}
+  catch(e){$('status').textContent=e.message;}
+}
+start();
+window.addEventListener('resize',()=>{if(ds)render();});
+</script></body></html>
